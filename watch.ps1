@@ -101,10 +101,10 @@ $toSend = New-Object System.Collections.Generic.List[object]
 
 foreach ($item in $posts) {
     $post = Get-NormalizedPost $item
-    $pid = [string]$post.id
-    if ([string]::IsNullOrWhiteSpace($pid)) { continue }
-    $foundIds.Add($pid)
-    if ($seen.Contains($pid)) { continue }
+    $postId = [string]$post.id
+    if ([string]::IsNullOrWhiteSpace($postId)) { continue }
+    $foundIds.Add($postId)
+    if ($seen.Contains($postId)) { continue }
     if (Test-Reply $post) { continue }
     $toSend.Add($post)
 }
