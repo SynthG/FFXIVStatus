@@ -1,0 +1,30 @@
+name: FortniteStatus to Teams
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Poll FortniteStatus and post to Teams
+        shell: pwsh
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: ./watch.ps1
+
+      - name: Save seen IDs
+        run: |
+          git config user.name "fnstatus-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen.json
+          git diff --staged --quiet && echo "No seen.json change" && exit 0
+          git commit -m "Update seen FortniteStatus IDs"
+          git push
