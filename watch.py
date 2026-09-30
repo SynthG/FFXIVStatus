@@ -7,17 +7,28 @@ HANDLE = "FortniteStatus"
 WEBHOOK = os.environ["TEAMS_WEBHOOK_URL"]
 STATE = Path("seen.json")
 API = f"https://api.fxtwitter.com/2/profile/{HANDLE}/statuses?count=20"
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
 
 
 def get(url: str):
-    req = urllib.request.Request(url, headers={"User-Agent": "fnstatus-watcher/1.0"})
+    req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode())
 
 
 def load_seen():
     if STATE.exists():
-        return set(json.loads(STATE.read_text(encoding="utf-8")))
+        raw = STATE.read_text(encoding="utf-8").strip()
+        if not raw:
+            return set()
+        return set(json.loads(raw))
     return set()
 
 
@@ -80,7 +91,7 @@ def notify(text: str, url: str) -> None:
         method="POST",
         headers={
             "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "fnstatus-watcher/1.0",
+            "User-Agent": HEADERS["User-Agent"],
         },
     )
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -88,7 +99,7 @@ def notify(text: str, url: str) -> None:
 
 
 def normalize(item: dict) -> dict:
-    if item.get("type") == "status" and "status" in item:
+    if item.get("type") == "status" and isinstance(item.get("status"), dict):
         return item["status"]
     return item
 
@@ -102,12 +113,14 @@ def main() -> None:
     found_ids = []
     to_send = []
     for item in posts:
-        post = normalize(item)
-        pid = str(post.get("id") or "")
-        if not pid:
+        if not isinstance(item, dict):
             continue
-        found_ids.append(pid)
-        if pid in seen or is_reply(post):
+        post = normalize(item)
+        post_id = str(post.get("id") or "")
+        if not post_id:
+            continue
+        found_ids.append(post_id)
+        if post_id in seen or is_reply(post):
             continue
         to_send.append(post)
 
