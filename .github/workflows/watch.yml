@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Poll FortniteStatus and post to Teams
         env:
@@ -26,4 +28,5 @@ jobs:
           git add seen.json
           git diff --staged --quiet && echo "No seen.json change" && exit 0
           git commit -m "Update seen FortniteStatus IDs"
+          git pull --rebase origin main
           git push
