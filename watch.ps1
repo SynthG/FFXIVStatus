@@ -1,71 +1,106 @@
 $ErrorActionPreference = "Stop"
 
-$Handle = "FortniteStatus"
-$Webhook = $env:TEAMS_WEBHOOK_URL
-if ([string]::IsNullOrWhiteSpace($Webhook)) {
+$AccountHandle = "FortniteStatus"
+$WebhookUrl = $env:TEAMS_WEBHOOK_URL
+if ([string]::IsNullOrWhiteSpace($WebhookUrl)) {
     throw "TEAMS_WEBHOOK_URL is missing"
 }
 
-$StateFile = Join-Path $PSScriptRoot "seen.json"
-$Api = "https://api.fxtwitter.com/2/profile/$Handle/statuses?count=20"
+$StatePath = Join-Path -Path $PSScriptRoot -ChildPath "seen.json"
+$TimelineUrl = "https://api.fxtwitter.com/2/profile/$AccountHandle/statuses?count=20"
 
-function Get-Json($Url) {
-    $req = [System.Net.HttpWebRequest]::Create($Url)
-    $req.UserAgent = "fnstatus-watcher/1.0"
-    $req.Timeout = 30000
-    $resp = $req.GetResponse()
+function Read-RemoteJson {
+    param([string]$Url)
+
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.UserAgent = "fnstatus-watcher/1.0"
+    $request.Timeout = 30000
+    $response = $request.GetResponse()
     try {
-        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
-        $text = $reader.ReadToEnd()
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        $raw = $reader.ReadToEnd()
         $reader.Close()
-        return $text | ConvertFrom-Json
+        return $raw | ConvertFrom-Json
     }
     finally {
-        $resp.Close()
+        $response.Close()
     }
 }
 
-function Get-Seen {
-    if (Test-Path $StateFile) {
-        $raw = Get-Content -Raw -Path $StateFile
-        if ([string]::IsNullOrWhiteSpace($raw)) { return [System.Collections.Generic.HashSet[string]]::new() }
-        $arr = $raw | ConvertFrom-Json
-        $set = [System.Collections.Generic.HashSet[string]]::new()
-        foreach ($id in @($arr)) { [void]$set.Add([string]$id) }
-        return $set
+function Read-SeenIds {
+    $box = [System.Collections.Generic.HashSet[string]]::new()
+    if (-not (Test-Path -Path $StatePath)) {
+        return $box
     }
-    return [System.Collections.Generic.HashSet[string]]::new()
+
+    $raw = Get-Content -Path $StatePath -Raw
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return $box
+    }
+
+    foreach ($value in @($raw | ConvertFrom-Json)) {
+        [void]$box.Add([string]$value)
+    }
+    return $box
 }
 
-function Save-Seen($Ids) {
-    $list = @($Ids) | Sort-Object
-    if ($list.Count -gt 200) {
-        $list = $list | Select-Object -Last 200
+function Write-SeenIds {
+    param($IdSet)
+
+    $ordered = @($IdSet) | Sort-Object
+    if ($ordered.Count -gt 200) {
+        $ordered = $ordered | Select-Object -Last 200
     }
-    ($list | ConvertTo-Json -Compress) | Set-Content -Path $StateFile -Encoding utf8
+
+    $json = $ordered | ConvertTo-Json -Compress
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        $json = "[]"
+    }
+    Set-Content -Path $StatePath -Value $json -Encoding utf8
 }
 
-function Test-Reply($Post) {
-    $text = [string]$Post.text
-    if ($text.TrimStart().StartsWith("@")) { return $true }
-    if ($Post.replying_to -or $Post.in_reply_to) { return $true }
-    if ($Post.reply -and ($Post.reply.in_reply_to_status_id -or $Post.reply.in_reply_to_screen_name)) { return $true }
+function Test-IsReplyPost {
+    param($Status)
+
+    $bodyText = [string]$Status.text
+    if ($bodyText.TrimStart().StartsWith("@")) {
+        return $true
+    }
+    if ($Status.replying_to -or $Status.in_reply_to) {
+        return $true
+    }
+    if ($Status.reply -and ($Status.reply.in_reply_to_status_id -or $Status.reply.in_reply_to_screen_name)) {
+        return $true
+    }
     return $false
 }
 
-function Get-PostUrl($Post) {
-    if ($Post.url) { return [string]$Post.url }
-    return "https://x.com/$Handle/status/$($Post.id)"
+function Get-StatusUrl {
+    param($Status)
+
+    if ($Status.url) {
+        return [string]$Status.url
+    }
+    return "https://x.com/$AccountHandle/status/$($Status.id)"
 }
 
-function Get-NormalizedPost($Item) {
-    if ($Item.type -eq "status" -and $Item.status) { return $Item.status }
-    return $Item
+function Get-StatusObject {
+    param($Entry)
+
+    if ($Entry.type -eq "status" -and $Entry.status) {
+        return $Entry.status
+    }
+    return $Entry
 }
 
-function Send-TeamsCard($Text, $Url) {
+function Send-TeamsCard {
+    param(
+        [string]$MessageText,
+        [string]$PostLink
+    )
+
     $payload = @{
-        type = "message"
+        type        = "message"
         attachments = @(
             @{
                 contentType = "application/vnd.microsoft.card.adaptive"
@@ -76,8 +111,8 @@ function Send-TeamsCard($Text, $Url) {
                     version   = "1.3"
                     body      = @(
                         @{ type = "TextBlock"; weight = "Bolder"; size = "Medium"; text = "Fortnite Status" }
-                        @{ type = "TextBlock"; wrap = $true; text = $Text }
-                        @{ type = "TextBlock"; wrap = $true; isSubtle = $true; text = $Url }
+                        @{ type = "TextBlock"; wrap = $true; text = $MessageText }
+                        @{ type = "TextBlock"; wrap = $true; isSubtle = $true; text = $PostLink }
                     )
                 }
             }
@@ -85,42 +120,57 @@ function Send-TeamsCard($Text, $Url) {
     }
 
     $json = $payload | ConvertTo-Json -Depth 10 -Compress
-    Invoke-RestMethod -Uri $Webhook -Method Post -Body $json -ContentType "application/json; charset=utf-8" | Out-Null
+    Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $json -ContentType "application/json; charset=utf-8" | Out-Null
 }
 
-$seen = Get-Seen
-$firstRun = ($seen.Count -eq 0)
-$data = Get-Json $Api
+$seenIds = Read-SeenIds
+$isFirstRun = ($seenIds.Count -eq 0)
+$timeline = Read-RemoteJson -Url $TimelineUrl
 
-$posts = @()
-if ($data.results) { $posts = @($data.results) }
-elseif ($data.timeline) { $posts = @($data.timeline) }
+$entries = @()
+if ($timeline.results) {
+    $entries = @($timeline.results)
+}
+elseif ($timeline.timeline) {
+    $entries = @($timeline.timeline)
+}
 
 $foundIds = New-Object System.Collections.Generic.List[string]
-$toSend = New-Object System.Collections.Generic.List[object]
+$pending = New-Object System.Collections.Generic.List[object]
 
-foreach ($item in $posts) {
-    $post = Get-NormalizedPost $item
-    $postId = [string]$post.id
-    if ([string]::IsNullOrWhiteSpace($postId)) { continue }
-    $foundIds.Add($postId)
-    if ($seen.Contains($postId)) { continue }
-    if (Test-Reply $post) { continue }
-    $toSend.Add($post)
+foreach ($entry in $entries) {
+    $status = Get-StatusObject -Entry $entry
+    $statusId = [string]$status.id
+    if ([string]::IsNullOrWhiteSpace($statusId)) {
+        continue
+    }
+
+    $foundIds.Add($statusId)
+    if ($seenIds.Contains($statusId)) {
+        continue
+    }
+    if (Test-IsReplyPost -Status $status) {
+        continue
+    }
+    $pending.Add($status)
 }
 
-if ($firstRun) {
-    foreach ($id in $foundIds) { [void]$seen.Add($id) }
-    Save-Seen $seen
+if ($isFirstRun) {
+    foreach ($statusId in $foundIds) {
+        [void]$seenIds.Add($statusId)
+    }
+    Write-SeenIds -IdSet $seenIds
     Write-Host "Primed $($foundIds.Count) posts, nothing sent"
     exit 0
 }
 
-$toSend = $toSend | Sort-Object { [int64]$_.id }
-foreach ($post in $toSend) {
-    Send-TeamsCard ([string]$post.text) (Get-PostUrl $post)
-    Write-Host "Sent $($post.id)"
+$pending = $pending | Sort-Object { [int64]$_.id }
+foreach ($status in $pending) {
+    Send-TeamsCard -MessageText ([string]$status.text) -PostLink (Get-StatusUrl -Status $status)
+    Write-Host "Sent $($status.id)"
 }
 
-foreach ($id in $foundIds) { [void]$seen.Add($id) }
-Save-Seen $seen
+foreach ($statusId in $foundIds) {
+    [void]$seenIds.Add($statusId)
+}
+Write-SeenIds -IdSet $seenIds
