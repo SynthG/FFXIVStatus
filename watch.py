@@ -69,7 +69,7 @@ def notify(handle: str, text: str, url: str) -> None:
                             "type": "TextBlock",
                             "weight": "Bolder",
                             "size": "Medium",
-                            "text": "A new post from!" handle,
+                            "text": f"A new post from {handle}!",
                         },
                         {
                             "type": "TextBlock",
