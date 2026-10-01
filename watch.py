@@ -3,7 +3,7 @@ import os
 import urllib.request
 from pathlib import Path
 
-HANDLES = ["FortniteStatus", "FNCompetitive"]
+HANDLES = ["FortniteStatus", "FNCompetitive", "pokiesart"]
 WEBHOOK = os.environ["TEAMS_WEBHOOK_URL"]
 STATE = Path("seen.json")
 HEADERS = {
