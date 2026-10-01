@@ -1,6 +1,5 @@
 name: FFXIVNews to Teams
 
-# Force GitHub to re-register the cron (schedule has never fired on this repo).
 on:
   schedule:
     - cron: "3-59/5 * * * *"
@@ -17,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Poll FortniteStatus and post to Teams
+      - name: Poll FFXIVStatus and post to Teams
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: python watch.py
