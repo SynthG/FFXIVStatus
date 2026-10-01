@@ -1,4 +1,4 @@
-name: FortniteStatus to Teams
+name: FFXIVNews to Teams
 
 # Force GitHub to re-register the cron (schedule has never fired on this repo).
 on:
@@ -24,10 +24,10 @@ jobs:
 
       - name: Save seen IDs
         run: |
-          git config user.name "fnstatus-bot"
+          git config user.name "FFXIVNews-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add seen.json
           git diff --staged --quiet && echo "No seen.json change" && exit 0
-          git commit -m "Update seen FortniteStatus IDs"
+          git commit -m "Update seen FFXIVNews IDs"
           git pull --rebase origin main
           git push
