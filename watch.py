@@ -3,10 +3,9 @@ import os
 import urllib.request
 from pathlib import Path
 
-HANDLE = "FortniteStatus"
+HANDLES = ["FortniteStatus", "FNCompetitive"]
 WEBHOOK = os.environ["TEAMS_WEBHOOK_URL"]
 STATE = Path("seen.json")
-API = f"https://api.fxtwitter.com/2/profile/{HANDLE}/statuses?count=20"
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -15,6 +14,10 @@ HEADERS = {
     ),
     "Accept": "application/json",
 }
+
+
+def timeline_url(handle: str) -> str:
+    return f"https://api.fxtwitter.com/2/profile/{handle}/statuses?count=20"
 
 
 def get(url: str):
@@ -28,12 +31,12 @@ def load_seen():
         raw = STATE.read_text(encoding="utf-8").strip()
         if not raw:
             return set()
-        return set(json.loads(raw))
+        return {str(x) for x in json.loads(raw)}
     return set()
 
 
 def save_seen(ids):
-    STATE.write_text(json.dumps(sorted(ids)[-200:], indent=2), encoding="utf-8")
+    STATE.write_text(json.dumps(sorted(ids)[-400:], indent=2), encoding="utf-8")
 
 
 def is_reply(post: dict) -> bool:
@@ -46,11 +49,11 @@ def is_reply(post: dict) -> bool:
     return bool(reply.get("in_reply_to_status_id") or reply.get("in_reply_to_screen_name"))
 
 
-def post_url(post: dict) -> str:
-    return post.get("url") or f"https://x.com/{HANDLE}/status/{post.get('id')}"
+def post_url(handle: str, post: dict) -> str:
+    return post.get("url") or f"https://x.com/{handle}/status/{post.get('id')}"
 
 
-def notify(text: str, url: str) -> None:
+def notify(handle: str, text: str, url: str) -> None:
     card = {
         "type": "message",
         "attachments": [
@@ -66,7 +69,7 @@ def notify(text: str, url: str) -> None:
                             "type": "TextBlock",
                             "weight": "Bolder",
                             "size": "Medium",
-                            "text": "Fortnite Status",
+                            "text": handle,
                         },
                         {
                             "type": "TextBlock",
@@ -104,37 +107,46 @@ def normalize(item: dict) -> dict:
     return item
 
 
-def main() -> None:
-    seen = load_seen()
-    first_run = not seen
-    payload = get(API)
-    posts = payload.get("results") or payload.get("timeline") or []
-
-    found_ids = []
-    to_send = []
-    for item in posts:
+def collect_posts(handle: str):
+    payload = get(timeline_url(handle))
+    items = payload.get("results") or payload.get("timeline") or []
+    posts = []
+    for item in items:
         if not isinstance(item, dict):
             continue
         post = normalize(item)
         post_id = str(post.get("id") or "")
-        if not post_id:
+        if post_id:
+            posts.append(post)
+    return posts
+
+
+def main() -> None:
+    seen = load_seen()
+
+    for handle in HANDLES:
+        posts = collect_posts(handle)
+        found_ids = [str(post.get("id")) for post in posts]
+        known = [post_id for post_id in found_ids if post_id in seen]
+
+        if not known:
+            seen.update(found_ids)
+            print(f"Primed {handle}: {len(found_ids)} posts, nothing sent")
             continue
-        found_ids.append(post_id)
-        if post_id in seen or is_reply(post):
-            continue
-        to_send.append(post)
 
-    if first_run:
-        save_seen(set(found_ids) | seen)
-        print(f"Primed {len(found_ids)} posts, nothing sent")
-        return
+        to_send = [
+            post
+            for post in posts
+            if str(post.get("id")) not in seen and not is_reply(post)
+        ]
+        to_send.sort(key=lambda p: int(p.get("id") or 0))
+        for post in to_send:
+            notify(handle, post.get("text") or "", post_url(handle, post))
+            print(f"Sent {handle} {post.get('id')}")
 
-    to_send.sort(key=lambda p: int(p.get("id") or 0))
-    for post in to_send:
-        notify(post.get("text") or "", post_url(post))
-        print("Sent", post.get("id"))
+        seen.update(found_ids)
 
-    save_seen(seen | set(found_ids))
+    save_seen(seen)
 
 
 if __name__ == "__main__":
